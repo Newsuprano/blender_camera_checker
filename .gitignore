@@ -1,0 +1,8 @@
+# Output reports
+output/
+
+# Blender backup files
+*.blend1
+
+# Python cache
+__pycache__/
