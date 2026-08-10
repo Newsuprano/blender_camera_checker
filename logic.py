@@ -25,8 +25,10 @@ def get_frame_clusters_tuple(column_data) :
     for camera_name, attr_tuple in column_data.dropna().items() :
         groups[attr_tuple].append(camera_name)
 
+    sorted_groups = sorted(groups.items(), key=lambda item: len(item[1]), reverse=True)
+
     cluster_results = {}
-    for group_id, (attr_tuple, cameras) in enumerate(groups.items()) :
+    for group_id, (attr_tuple, cameras) in enumerate(sorted_groups) :
         for camera in cameras :
             cluster_results[camera] = {
                 "group_id" : group_id,
