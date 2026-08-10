@@ -38,10 +38,7 @@ class CameraTableModel(QAbstractTableModel) :
         frame_name = self._df.columns[col]
 
         if role == Qt.ItemDataRole.DisplayRole :
-            frame_clusters = self.cluster_cache.get(frame_name, {})
-            if camera_name in frame_clusters :
-                return str(frame_clusters[camera_name]["group_id"])
-            return "-"
+            return None
 
         elif role == Qt.ItemDataRole.BackgroundRole :
             frame_clusters = self.cluster_cache.get(frame_name, {})
