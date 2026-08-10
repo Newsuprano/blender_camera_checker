@@ -1,5 +1,5 @@
 from PyQt6.QtCore import QAbstractTableModel, Qt
-from PyQt6.QtGui import QColor, QBrush
+from PyQt6.QtGui import QColor, QBrush, QIcon, QPixmap
 from logic import get_frame_clusters_tuple
 
 class CameraTableModel(QAbstractTableModel) :
@@ -65,3 +65,20 @@ class CameraTableModel(QAbstractTableModel) :
             QColor(200, 150, 255),   # Bright Purple (Group 4)
         ]
         return palette[group_id % len(palette)]
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal:
+            if role == Qt.ItemDataRole.DisplayRole:
+                return str(self._df.columns[section])
+                
+        elif orientation == Qt.Orientation.Vertical:
+            if role == Qt.ItemDataRole.DisplayRole:
+                # Returns the camera name (e.g., "Camera01")
+                return str(self._df.index[section])
+            
+            elif role == Qt.ItemDataRole.DecorationRole:
+                # Adds a small icon to the left of the vertical header text
+                # You can point this to a local "blender_icon.png" or use a standard style icon
+                return QIcon("blender_icon.png") # Or QIcon.fromTheme("applications-other") as a fallback
+
+        return super().headerData(section, orientation, role)

@@ -3,6 +3,17 @@ import math
 import csv
 from pathlib import Path
 import os
+import sys
+
+argv = sys.argv
+if "--" in argv :
+    argv = argv[argv.index("--") + 1:]
+else :
+    argv = []
+
+output_dir = Path(argv[0] if argv else Path("output"))
+output_dir.mkdir(parents=True, exist_ok=True)
+output_path = output_dir / "camera_data.csv"
 
 scene = bpy.context.scene
 filename = Path(bpy.path.basename(bpy.data.filepath)).stem
