@@ -15,7 +15,7 @@ class SettingsDialog(QDialog):
     def __init__(self, current_blender_path, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(520, 240)  # Slightly taller to fit the new setting
+        self.resize(520, 240) 
 
         self.blender_path = current_blender_path
         
@@ -69,13 +69,26 @@ class SettingsDialog(QDialog):
         current_text = self.folder_input.text().strip()
         start_dir = str(Path(current_text).parent) if current_text and Path(current_text).exists() else ""
         
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Blender Installation Directory", start_dir)
-        if dir_path:
-            potential_exe = Path(dir_path) / "blender.exe"
-            if potential_exe.exists():
-                self.folder_input.setText(str(potential_exe))
+        # Allow selecting either the blender.exe file directly or any file/folder fallback
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Select Blender Executable", 
+            start_dir, 
+            "Blender Executable (blender.exe);;All Files (*)"
+        )
+        
+        if file_path:
+            selected_path = Path(file_path)
+            # If they selected the executable directly, use it
+            if selected_path.name.lower() == "blender.exe":
+                self.folder_input.setText(str(selected_path))
             else:
-                self.folder_input.setText(dir_path)
+                # Fallback if they selected something else in that folder
+                potential_exe = selected_path.parent / "blender.exe"
+                if potential_exe.exists():
+                    self.folder_input.setText(str(potential_exe))
+                else:
+                    self.folder_input.setText(str(selected_path))
 
     def on_save(self):
         # Capture the Blender path

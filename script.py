@@ -2,18 +2,24 @@ import argparse
 import subprocess
 from pathlib import Path
 
-def run_batch_extraction(input_dir, output_dir, blender_exe) :
+def run_batch_extraction(input_dir, output_dir, blender_exe, progress_callback=None):
     input_folder_path = Path(input_dir)
     output_folder_path = Path(output_dir)
     output_folder_path.mkdir(parents=True, exist_ok=True)
 
     raw_data_csv = output_folder_path / "camera_data.csv"
-    if raw_data_csv.exists() :
+    if raw_data_csv.exists():
         raw_data_csv.unlink()
 
     extractor_path = Path(__file__).parent / "blender_extractor.py"
+    
+    blend_files = list(input_folder_path.glob('*.blend'))
+    total_files = len(blend_files)
 
-    for file_path in input_folder_path.glob('*.blend') :
+    for index, file_path in enumerate(blend_files, start=1):
+        if progress_callback:
+            progress_callback(index, total_files, f"Extracting from {file_path.name} ({index}/{total_files})")
+            
         subprocess.run(f'"{blender_exe}" --background "{file_path}" --python "{extractor_path}" -- "{output_folder_path}"', shell=True)
 
 

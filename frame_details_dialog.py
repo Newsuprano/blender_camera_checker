@@ -136,13 +136,13 @@ class FrameDetailsDialog(QDialog):
 
         # Map column indices to your preferred full descriptive words
         attribute_names_map = {
-            1: "the position on the X axis",
-            2: "the position on the Y axis",
-            3: "the position on the Z axis",
-            4: "the rotation on the X axis",
-            5: "the rotation on the Y axis",
-            6: "the rotation on the Z axis",
-            7: "the focal length"
+            1: "Position on the X axis",
+            2: "Position on the Y axis",
+            3: "Position on the Z axis",
+            4: "Rotation on the X axis",
+            5: "Rotation on the Y axis",
+            6: "Rotation on the Z axis",
+            7: "Focal length"
         }
         
         attr_name = attribute_names_map.get(logical_index, "Attribute")
@@ -163,4 +163,4 @@ class FrameDetailsDialog(QDialog):
             all_frames_data=full_df, 
             parent=self
         )
-        self.graph_dialog.exec()
+        self.graph_dialog.show()

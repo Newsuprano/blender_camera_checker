@@ -31,7 +31,7 @@ class AttributeGraphDialog(QDialog):
         # Calculate total frames and set the clear title dynamically
         frames = sorted(list(self.all_frames_data.keys()))
         total_frames_count = len(frames)
-        self.plot_widget.setTitle(f'Evolution of {attribute_name} over {total_frames_count} frames', color="w", size="11pt")
+        self.plot_widget.setTitle(f'Evolution of the {attribute_name} over {total_frames_count} frames', color="w", size="11pt")
         
         main_layout.addWidget(self.plot_widget, stretch=4)
         

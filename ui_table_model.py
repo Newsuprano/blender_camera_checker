@@ -71,7 +71,7 @@ class CameraTableModel(QAbstractTableModel) :
             QColor(150, 255, 150),   # Group 0: Neon Green
             QColor(255, 100, 100),   # Group 1: Intense Red
             QColor(255, 255, 100),   # Group 2: Bright Yellow
-            QColor(100, 200, 255),   # Group 3: Vivid Cyan
+            QColor(100, 50, 255),   # Group 3: Vivid Cyan
             QColor(200, 150, 255),   # Group 4: Bright Purple
         ]
 
@@ -87,7 +87,7 @@ class CameraTableModel(QAbstractTableModel) :
         hue_deg = int(hue * 360)
         
         # Maximum saturation (255) and high value (255) to keep them neon/vivid like your palette
-        return QColor.fromHsv(hue_deg, 205, 255)
+        return QColor.fromHsv(hue_deg, 150, 255)
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         # Handle Horizontal Headers (DataFrame columns)

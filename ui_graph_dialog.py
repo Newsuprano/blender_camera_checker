@@ -97,7 +97,6 @@ class AttributeGraphDialog(QDialog):
             # Create a toggle checkbox in the sidebar
             checkbox = QCheckBox(str(cam_name))
             checkbox.setChecked(True)
-            # Style checkbox text color to match its curve color roughly or stay white
 
             # Create a toggle checkbox in the sidebar
             checkbox = QCheckBox(str(cam_name))
