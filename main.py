@@ -19,15 +19,19 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QProgressBar,
     QLineEdit,
-    QCheckBox
+    QCheckBox,
+    QDialogButtonBox
 )
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QColor, QBrush, QIcon
 from logic import load_and_pivot_data, count_frame_statuses, create_mismatched_dataframe, get_frame_clusters_tuple
 from ui_table_model import CameraTableModel
+from ui_graph_dialog import AttributeGraphDialog
 from script import run_batch_extraction
 import subprocess
 import json
+import pandas as pd
+from frame_details_dialog import FrameDetailsDialog
 
 CONFIG_FILE = Path("config_cache.json")
 
@@ -62,17 +66,19 @@ class MainWindow(QMainWindow) :
 
         self.current_csv_path = Path("output/camera_data.csv")
         self.output_filename = "camera_data.csv"
-        self.blender_exe_path = r'C:\Program Files\Blender Foundation\Blender 5.2\blender.exe'
 
         # Load initial data safely
         try:
             self.pivot_df = load_and_pivot_data(str(self.current_csv_path))
-            _, _, bad_frames = count_frame_statuses(self.pivot_df)
+            identical_count, mismatched_count, bad_frames = count_frame_statuses(self.pivot_df)
             self.mismatched_df = create_mismatched_dataframe(self.pivot_df, bad_frames)
         except Exception:
-            import pandas as pd
             self.pivot_df = pd.DataFrame()
             self.mismatched_df = pd.DataFrame()
+            identical_count, mismatched_count = 0, 0
+
+        total_frames = len(self.pivot_df.columns) if not self.pivot_df.empty else 0
+        matching_percentage = (identical_count / total_frames * 100) if total_frames > 0 else 0
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -97,7 +103,6 @@ class MainWindow(QMainWindow) :
 
         toolbar.addSeparator()
 
-        # Checkbox widget wrapper for the toolbar
         self.mismatch_checkbox = QCheckBox("Show Mismatches Only")
         self.mismatch_checkbox.toggled.connect(self.on_toggle_mismatches_checkbox)
         toolbar.addWidget(self.mismatch_checkbox)
@@ -121,13 +126,28 @@ class MainWindow(QMainWindow) :
         horizontal_header.setSectionsClickable(True)
         horizontal_header.sectionClicked.connect(self.on_frame_header_clicked)
 
+        # --- INFO PANEL SETUP ---
+        self.info_panel_widget = QWidget()
+        info_layout = QHBoxLayout(self.info_panel_widget)
+        info_layout.setContentsMargins(10, 5, 10, 5)
+
+        self.match_label = QLabel(f"<b>Matching Frames:</b> {identical_count}")
+        self.mismatch_label = QLabel(f"<b>Mismatched Frames:</b> {mismatched_count}")
+        self.percent_label = QLabel(f"<b>Sync Rate:</b> {matching_percentage:.1f}%")
+
+        info_layout.addWidget(self.match_label)
+        info_layout.addWidget(self.mismatch_label)
+        info_layout.addStretch()
+        info_layout.addWidget(self.percent_label)
+
+        # Added to the correct main layout variable
+        layout.addWidget(self.info_panel_widget)
+
     def on_camera_row_header_clicked(self, logical_index):
         self.close_active_frame_dialog()
         
-        # Get camera name from model
         camera_name = self.model.headerData(logical_index, Qt.Orientation.Vertical, Qt.ItemDataRole.DisplayRole)
         
-        # Always check/reload from cache to ensure we have the latest path stored
         cache = load_cache()
         input_dir = self.last_input_dir if hasattr(self, "last_input_dir") and self.last_input_dir else cache.get("last_input_dir", "")
         
@@ -188,7 +208,6 @@ class MainWindow(QMainWindow) :
         if not input_dir or not output_dir:
             return
 
-        # <--- ADD THIS LINE HERE so the app remembers the folder path --->
         self.last_input_dir = input_dir
         self.last_output_dir = output_dir
         save_cache({
@@ -208,7 +227,6 @@ class MainWindow(QMainWindow) :
         self.output_filename = custom_name.strip()
         target_csv_path = Path(output_dir) / self.output_filename
 
-        # Check if file already exists and warn the user
         if target_csv_path.exists():
             reply = QMessageBox.warning(
                 self,
@@ -221,7 +239,6 @@ class MainWindow(QMainWindow) :
             if reply == QMessageBox.StandardButton.Cancel:
                 return
 
-        # Launch the progress popup dialog with background worker thread
         progress_dialog = ProgressDialog(input_dir, output_dir, self.blender_exe_path, self)
         result_code = progress_dialog.exec()
 
@@ -235,8 +252,8 @@ class MainWindow(QMainWindow) :
                         self.current_csv_path.unlink()
                     default_generated_path.rename(self.current_csv_path)
 
-                # Reload table data
                 self.load_data_into_app(str(self.current_csv_path))
+                save_cache({"last_csv_path": str(self.current_csv_path)})
                 QMessageBox.information(self, "Success", f"Pipeline executed successfully!\nSaved as: {self.output_filename}")
             except Exception as e :
                 QMessageBox.critical(self, "Pipeline Error", f"An error occurred while saving/loading:\n{str(e)}")
@@ -244,17 +261,23 @@ class MainWindow(QMainWindow) :
             if progress_dialog.error_message:
                 QMessageBox.critical(self, "Pipeline Error", f"An error occurred during execution:\n{progress_dialog.error_message}")
 
-    def on_open_existing_pipeline(self) :
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open Existing Pipeline Report", "", "CSV Files (*.csv)"
-        )
-        if not file_path :
+    def on_open_existing_pipeline(self):
+        cache = load_cache()
+        # Get the last used file path from cache, falling back to an empty string
+        default_file = cache.get("last_csv_path", "")
+
+        dialog = ExistingPipelineDialog(default_file, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        file_path = dialog.selected_file
+        if not file_path:
             return
 
         try:
             self.current_csv_path = Path(file_path)
-            self.last_output_dir = str(self.current_csv_path.parent)
-            save_cache({"last_output_dir" : self.last_output_dir})
+            # Save the full file path to the cache
+            save_cache({"last_csv_path": str(self.current_csv_path)})
 
             self.load_data_into_app(str(self.current_csv_path))
             QMessageBox.information(self, "Loaded", f"Successfully loaded report:\n{file_path}")
@@ -270,6 +293,17 @@ class MainWindow(QMainWindow) :
             self.model.update_data(self.mismatched_df)
         else :
             self.model.update_data(self.pivot_df)
+            
+        self.update_info_panel(self.pivot_df)
+
+    def update_info_panel(self, df):
+        total_frames = len(df.columns) if not df.empty else 0
+        identical_count, mismatched_count, _ = count_frame_statuses(df) if not df.empty else (0, 0, [])
+        matching_percentage = (identical_count / total_frames * 100) if total_frames > 0 else 0
+
+        self.match_label.setText(f"<b>Matching Frames:</b> {identical_count}")
+        self.mismatch_label.setText(f"<b>Mismatched Frames:</b> {mismatched_count}")
+        self.percent_label.setText(f"<b>Sync Rate:</b> {matching_percentage:.1f}%")
 
 
 class PipelineConfigDialog(QDialog):
@@ -422,102 +456,6 @@ class ProgressDialog(QDialog):
             self.reject()
 
 
-class FrameDetailsDialog(QDialog):
-    def __init__(self, frame_name, column_data, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Details for Frame: {frame_name}")
-        self.resize(650, 400)
-
-        layout = QVBoxLayout(self)
-
-        title_label = QLabel(f"Attribute Breakdown for Frame {frame_name}")
-        layout.addWidget(title_label)
-
-        self.table = QTableWidget()
-        layout.addWidget(self.table)
-
-        self.populate_data(column_data)
-
-    def populate_data(self, column_data):
-        valid_data = column_data.dropna()
-        cameras = list(valid_data.index)
-        
-        self.table.setRowCount(len(cameras))
-        self.table.setColumnCount(8)
-        self.table.setHorizontalHeaderLabels([
-            "Camera", "Pos X", "Pos Y", "Pos Z", "Rot X", "Rot Y", "Rot Z", "Focal"
-        ])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-
-        camera_values = {}
-        for camera_name in cameras:
-            attr_tuple = valid_data[camera_name]
-            try:
-                pos, rot, focal = attr_tuple
-                px, py, pz = pos
-                rx, ry, rz = rot
-                camera_values[camera_name] = [px, py, pz, rx, ry, rz, focal]
-            except (ValueError, TypeError):
-                camera_values[camera_name] = None
-
-        col_group_mappings = []
-        for col_idx in range(7):
-            val_counts = {}
-            camera_val_map = {}
-            
-            for camera_name in cameras:
-                vals = camera_values[camera_name]
-                if vals is None:
-                    continue
-                v = vals[col_idx]
-                
-                matched_rep = None
-                for rep_val in val_counts:
-                    if abs(v - rep_val) < 1e-4:
-                        matched_rep = rep_val
-                        break
-                
-                if matched_rep is None:
-                    val_counts[v] = [v]
-                    camera_val_map[camera_name] = v
-                else:
-                    val_counts[matched_rep].append(v)
-                    camera_val_map[camera_name] = matched_rep
-
-            sorted_unique_vals = sorted(val_counts.keys(), key=lambda r: len(val_counts[r]), reverse=True)
-            val_to_gid = {val: gid for gid, val in enumerate(sorted_unique_vals)}
-            
-            cam_to_gid = {}
-            for camera_name in cameras:
-                if camera_name in camera_val_map:
-                    rep_v = camera_val_map[camera_name]
-                    for rv, gid in val_to_gid.items():
-                        if abs(rep_v - rv) < 1e-4:
-                            cam_to_gid[camera_name] = gid
-                            break
-                else:
-                    cam_to_gid[camera_name] = 0
-            
-            col_group_mappings.append(cam_to_gid)
-
-        for row, camera_name in enumerate(cameras):
-            self.table.setItem(row, 0, QTableWidgetItem(str(camera_name)))
-
-            vals = camera_values[camera_name]
-            if vals is not None:
-                for col_idx, val in enumerate(vals):
-                    item = QTableWidgetItem(f"{val:.5f}")
-                    cell_gid = col_group_mappings[col_idx].get(camera_name, 0)
-                    cell_color = self.parent().model.get_group_color(cell_gid)
-                    item.setBackground(QBrush(cell_color))
-                    self.table.setItem(row, col_idx + 1, item)
-            else:
-                self.table.setItem(row, 1, QTableWidgetItem(str(valid_data[camera_name])))
-                for col in range(2, 8):
-                    self.table.setItem(row, col, QTableWidgetItem("-"))
-
-# --- Add this new class alongside your other dialog classes ---
-
 class SettingsDialog(QDialog):
     def __init__(self, current_blender_path, parent=None):
         super().__init__(parent)
@@ -590,6 +528,46 @@ class SettingsDialog(QDialog):
                 
             self.folder_label.setText(self.blender_path)
             self.folder_label.setStyleSheet("color: black;")
+
+class ExistingPipelineDialog(QDialog):
+    def __init__(self, default_path="", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Use Existing Pipeline Report")
+        self.resize(500, 150)
+
+        layout = QVBoxLayout(self)
+
+        # Instruction label
+        layout.addWidget(QLabel("Select an existing CSV pipeline report:"))
+
+        # Path selection layout
+        path_layout = QHBoxLayout()
+        self.path_input = QLineEdit(default_path)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self.browse_file)
+        
+        path_layout.addWidget(self.path_input)
+        path_layout.addWidget(browse_btn)
+        layout.addLayout(path_layout)
+
+        # Dialog buttons (OK / Cancel)
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def browse_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Open Existing Pipeline Report", self.path_input.text(), "CSV Files (*.csv)"
+        )
+        if file_path:
+            self.path_input.setText(file_path)
+
+    @property
+    def selected_file(self):
+        return self.path_input.text()
 
 
 if __name__ == "__main__" :
