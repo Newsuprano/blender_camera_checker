@@ -6,8 +6,12 @@ from PyQt6.QtWidgets import (
     QTableWidget, 
     QTableWidgetItem, 
 )
-from PyQt6.QtGui import QColor, QBrush
+from PyQt6.QtGui import (
+    QColor, 
+    QBrush
+)
 from attribute_graph_dialog import AttributeGraphDialog
+from cache import load_cache
 
 class FrameDetailsDialog(QDialog):
     def __init__(self, frame_name, column_data, parent=None):
@@ -94,13 +98,16 @@ class FrameDetailsDialog(QDialog):
             
             col_group_mappings.append(cam_to_gid)
 
+        cache = load_cache()
+        decimals = cache.get("decimal_places", 4)
+
         for row, camera_name in enumerate(cameras):
             self.table.setItem(row, 0, QTableWidgetItem(str(camera_name)))
 
             vals = camera_values[camera_name]
             if vals is not None:
                 for col_idx, val in enumerate(vals):
-                    item = QTableWidgetItem(f"{val:.5f}")
+                    item = QTableWidgetItem(f"{val:.{decimals}f}")
                     cell_gid = col_group_mappings[col_idx].get(camera_name, 0)
                     total_groups_in_col = len(val_counts)
 
@@ -127,14 +134,21 @@ class FrameDetailsDialog(QDialog):
         if logical_index == 0:
             return
 
-        headers = ["Camera", "Pos X", "Pos Y", "Pos Z", "Rot X", "Rot Y", "Rot Z", "Focal"]
-        attr_name = headers[logical_index]
+        # Map column indices to your preferred full descriptive words
+        attribute_names_map = {
+            1: "the position on the X axis",
+            2: "the position on the Y axis",
+            3: "the position on the Z axis",
+            4: "the rotation on the X axis",
+            5: "the rotation on the Y axis",
+            6: "the rotation on the Z axis",
+            7: "the focal length"
+        }
+        
+        attr_name = attribute_names_map.get(logical_index, "Attribute")
         attr_col_idx = logical_index - 1 
 
         main_window = self.parent()
-        
-        # Grab the full multi-frame dataframe from your main window or its model
-        # (Change 'model' or '_df' to match whatever your main window calls it)
         full_df = getattr(main_window, "_df", None)
         if full_df is None and hasattr(main_window, "model"):
             full_df = getattr(main_window.model, "_df", None)
@@ -149,4 +163,4 @@ class FrameDetailsDialog(QDialog):
             all_frames_data=full_df, 
             parent=self
         )
-        self.graph_dialog.show()
+        self.graph_dialog.exec()

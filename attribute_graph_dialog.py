@@ -22,11 +22,17 @@ class AttributeGraphDialog(QDialog):
         
         main_layout = QHBoxLayout(self)
         
-        # Setup PyQtGraph plot widget
+        # Setup PyQtGraph plot widget first
         self.plot_widget = pg.PlotWidget()
         self.plot_widget.setLabel('left', attribute_name)
         self.plot_widget.setLabel('bottom', 'Frame Number')
         self.plot_widget.showGrid(x=True, y=True)
+        
+        # Calculate total frames and set the clear title dynamically
+        frames = sorted(list(self.all_frames_data.keys()))
+        total_frames_count = len(frames)
+        self.plot_widget.setTitle(f'Evolution of {attribute_name} over {total_frames_count} frames', color="w", size="11pt")
+        
         main_layout.addWidget(self.plot_widget, stretch=4)
         
         # Setup Sidebar for Toggles

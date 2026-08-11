@@ -2,7 +2,6 @@ import bpy
 import math
 import csv
 from pathlib import Path
-import os
 import sys
 
 argv = sys.argv

@@ -1,7 +1,6 @@
-import sys
-from pathlib import Path
-import subprocess
 import argparse
+import subprocess
+from pathlib import Path
 
 def run_batch_extraction(input_dir, output_dir, blender_exe) :
     input_folder_path = Path(input_dir)

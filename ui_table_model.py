@@ -1,6 +1,16 @@
-from PyQt6.QtCore import QAbstractTableModel, Qt
-from PyQt6.QtGui import QColor, QBrush, QIcon, QPixmap
+from pathlib import Path
+from PyQt6.QtCore import (
+    QAbstractTableModel, 
+    Qt
+)
+from PyQt6.QtGui import (
+    QColor, 
+    QBrush, 
+    QIcon
+)
 from logic import get_frame_clusters_tuple
+
+ICON_PATH = Path(__file__).parent / "assets" / "icons" / "blender_icon.png"
 
 class CameraTableModel(QAbstractTableModel) :
     def __init__(self, df) :
@@ -51,14 +61,6 @@ class CameraTableModel(QAbstractTableModel) :
 
         return None
 
-    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole) :
-        if role == Qt.ItemDataRole.DisplayRole :
-            if orientation == Qt.Orientation.Horizontal :
-                return str(self._df.columns[section])
-            elif orientation == Qt.Orientation.Vertical :
-                return str(self._df.index[section])
-        return None
-
     def get_dynamic_group_color(self, group_id, total_groups):
         # Keep your exact consensus color for Group 0
         if group_id == 0:
@@ -88,18 +90,19 @@ class CameraTableModel(QAbstractTableModel) :
         return QColor.fromHsv(hue_deg, 205, 255)
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        # Handle Horizontal Headers (DataFrame columns)
         if orientation == Qt.Orientation.Horizontal:
             if role == Qt.ItemDataRole.DisplayRole:
                 return str(self._df.columns[section])
                 
+        # Handle Vertical Headers (DataFrame index / Camera names)
         elif orientation == Qt.Orientation.Vertical:
             if role == Qt.ItemDataRole.DisplayRole:
-                # Returns the camera name (e.g., "Camera01")
                 return str(self._df.index[section])
             
             elif role == Qt.ItemDataRole.DecorationRole:
-                # Adds a small icon to the left of the vertical header text
-                # You can point this to a local "blender_icon.png" or use a standard style icon
-                return QIcon("blender_icon.png") # Or QIcon.fromTheme("applications-other") as a fallback
+                if ICON_PATH.exists():
+                    return QIcon(str(ICON_PATH))
+                return QIcon.fromTheme("applications-other")
 
         return super().headerData(section, orientation, role)

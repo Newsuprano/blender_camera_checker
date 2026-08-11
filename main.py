@@ -1,5 +1,18 @@
 import sys
 from pathlib import Path
+import subprocess
+
+import pandas as pd
+
+from PyQt6.QtCore import (
+    QThread, 
+    pyqtSignal, 
+    Qt,
+    QTimeLine,
+    QSize,
+    QTimer
+)
+
 from PyQt6.QtWidgets import (
     QApplication, 
     QMainWindow, 
@@ -11,8 +24,6 @@ from PyQt6.QtWidgets import (
     QHeaderView, 
     QDialog, 
     QLabel, 
-    QTableWidget, 
-    QTableWidgetItem, 
     QFileDialog, 
     QMessageBox,
     QToolBar,
@@ -20,38 +31,33 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QLineEdit,
     QCheckBox,
-    QDialogButtonBox
+    QDialogButtonBox,
+    QToolButton,
+    QMenu,
+    QStyle,
+    QSizePolicy
 )
-from PyQt6.QtCore import QThread, pyqtSignal, Qt
-from PyQt6.QtGui import QColor, QBrush, QIcon
-from logic import load_and_pivot_data, count_frame_statuses, create_mismatched_dataframe, get_frame_clusters_tuple
-from ui_table_model import CameraTableModel
-from ui_graph_dialog import AttributeGraphDialog
-from script import run_batch_extraction
-import subprocess
-import json
-import pandas as pd
+from PyQt6.QtGui import (
+    QAction,
+    QIcon,
+    QTransform
+)
+
+from cache import load_cache, save_cache
 from frame_details_dialog import FrameDetailsDialog
+from logic import (
+    count_frame_statuses, 
+    create_mismatched_dataframe, 
+    load_and_pivot_data
+)
+from script import run_batch_extraction
+from settings_dialog import SettingsDialog
+from ui_table_model import CameraTableModel
 
-CONFIG_FILE = Path("config_cache.json")
-
-def load_cache():
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-def save_cache(data):
-    try:
-        current_data = load_cache()
-        current_data.update(data)
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(current_data, f, indent=4)
-    except Exception as e:
-        print(f"Could not save cache: {e}")
+ARROW_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "arrow.png"
+RUN_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "play_arrow.png"
+OPEN_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "history.png"
+SETTINGS_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "settings.png"
 
 class MainWindow(QMainWindow) :
     def __init__(self) :
@@ -66,6 +72,8 @@ class MainWindow(QMainWindow) :
 
         self.current_csv_path = Path("output/camera_data.csv")
         self.output_filename = "camera_data.csv"
+
+        self.is_extracting = False
 
         # Load initial data safely
         try:
@@ -85,27 +93,128 @@ class MainWindow(QMainWindow) :
         layout = QVBoxLayout(central_widget)
 
         # --- TOOLBAR SETUP ---
-        toolbar = QToolBar("Main Toolbar")
-        self.addToolBar(toolbar)
+        self.toolbar = QToolBar("Main Toolbar")
 
-        self.run_pipeline_action = toolbar.addAction("Run New Pipeline")
+        self.toolbar.setIconSize(QSize(22, 22))
+
+        self.toolbar.setStyleSheet("""
+            QToolButton {
+                background: transparent;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 6px;
+                margin: 2px;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 35);
+                border-radius: 4px;
+            }
+            QToolButton:pressed {
+                background-color: rgba(255, 255, 255, 55);
+            }
+        """)
+        
+        cache = load_cache()
+        saved_area = cache.get("toolbar_area", None)
+        
+        if saved_area is not None:
+            self.addToolBar(Qt.ToolBarArea(saved_area), self.toolbar)
+        else:
+            self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.toolbar)
+
+        self.toolbar.allowedAreasChanged.connect(self.save_toolbar_state)
+        self.toolbar.allowedAreasChanged.connect(self.deferred_update_toolbar_display_mode)
+        self.toolbar.topLevelChanged.connect(self.save_toolbar_state)
+        self.toolbar.topLevelChanged.connect(self.deferred_update_toolbar_display_mode)
+
+        style = self.style()
+
+        # 1. Run New Pipeline Action (e.g., 14x14)
+        run_icon = self.create_custom_sized_icon(RUN_ICON_PATH, 24, 24) if RUN_ICON_PATH.exists() else style.standardIcon(QStyle.StandardPixmap.SP_MediaPlay)
+        self.run_pipeline_action = self.toolbar.addAction(run_icon, "Run New Pipeline")
         self.run_pipeline_action.triggered.connect(self.on_run_new_pipeline)
 
-        toolbar.addSeparator()
+        self.toolbar.addSeparator()
 
-        self.open_existing_action = toolbar.addAction("Use Existing Pipeline")
+        # 2. Use Existing Pipeline Action (e.g., 16x16)
+        open_icon = self.create_custom_sized_icon(OPEN_ICON_PATH, 16, 16) if OPEN_ICON_PATH.exists() else style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton)
+        self.open_existing_action = self.toolbar.addAction(open_icon, "Use Existing Pipeline")
         self.open_existing_action.triggered.connect(self.on_open_existing_pipeline)
 
-        toolbar.addSeparator()
+        self.toolbar.addSeparator()
 
-        self.settings_action = toolbar.addAction("Settings")
+        # 3. Settings Action (e.g., 18x18)
+        settings_icon = self.create_custom_sized_icon(SETTINGS_ICON_PATH, 18, 18) if SETTINGS_ICON_PATH.exists() else style.standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
+        self.settings_action = self.toolbar.addAction(settings_icon, "Settings")
         self.settings_action.triggered.connect(self.on_open_settings)
 
-        toolbar.addSeparator()
+        self.toolbar.addSeparator()
 
+        # 4. Mismatch Checkbox
         self.mismatch_checkbox = QCheckBox("Show Mismatches Only")
         self.mismatch_checkbox.toggled.connect(self.on_toggle_mismatches_checkbox)
-        toolbar.addWidget(self.mismatch_checkbox)
+        self.toolbar.addWidget(self.mismatch_checkbox)
+
+        # 5. Expanding Spacer (Pushes the dropdown button to the far right/bottom)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.toolbar.addWidget(spacer)
+
+        # 6. Dropdown Menu Button with Smooth Rotating Arrow Animation
+        self.display_menu_btn = QToolButton(self.toolbar)
+        self.display_menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.display_menu_btn.setStyleSheet("""
+            QToolButton::menu-indicator { image: none; }
+            QToolButton { background: transparent; border: none; padding: 4px; }
+            QToolButton:hover { background: rgba(255, 255, 255, 30); border-radius: 4px; }
+        """)
+
+        menu = QMenu(self.display_menu_btn)
+        
+        self.action_toggle_icons = QAction("Display Icons", self, checkable=True)
+        self.action_toggle_icons.setChecked(True)
+        self.action_toggle_icons.triggered.connect(self.update_toolbar_display_mode)
+        self.action_toggle_icons.triggered.connect(self.save_toolbar_state)
+        menu.addAction(self.action_toggle_icons)
+
+        self.action_toggle_text = QAction("Display Text", self, checkable=True)
+        self.action_toggle_text.setChecked(True)
+        self.action_toggle_text.triggered.connect(self.update_toolbar_display_mode)
+        self.action_toggle_text.triggered.connect(self.save_toolbar_state)
+        menu.addAction(self.action_toggle_text)
+
+        self.display_menu_btn.setMenu(menu)
+
+        # Helper to compute angles based on docking area and trigger the animation
+        def trigger_smooth_rotation(is_open):
+            area = self.toolBarArea(self.toolbar)
+            angles = {
+                Qt.ToolBarArea.TopToolBarArea: (0, 180),
+                Qt.ToolBarArea.BottomToolBarArea: (180, 0),
+                Qt.ToolBarArea.LeftToolBarArea: (270, 90),
+                Qt.ToolBarArea.RightToolBarArea: (90, 270)
+            }
+            default_angle, flipped_angle = angles.get(area, (0, 180))
+            
+            if is_open:
+                self.animate_arrow_rotation(default_angle, flipped_angle)
+            else:
+                self.animate_arrow_rotation(flipped_angle, default_angle)
+
+        # Initial setup on startup (snaps to resting position instantly)
+        self.update_arrow_icon(is_open=False)
+
+        # Connect signals to trigger smooth rotation when opening and closing
+        menu.aboutToShow.connect(lambda: trigger_smooth_rotation(is_open=True))
+        menu.aboutToHide.connect(lambda: trigger_smooth_rotation(is_open=False))
+
+        self.toolbar.addWidget(self.display_menu_btn)
+        
+        self.action_toggle_icons.setChecked(cache.get("icons_visible", True))
+        self.action_toggle_text.setChecked(cache.get("text_visible", True))
+
+        self.update_toolbar_display_mode()
+        self.update_arrow_to_resting_state()
         # ---------------------
 
         # Main Table View
@@ -117,7 +226,7 @@ class MainWindow(QMainWindow) :
         # Setup vertical header clicking for opening blend files
         vertical_header = self.table_view.verticalHeader()
         vertical_header.setSectionsClickable(True)
-        vertical_header.sectionClicked.connect(self.on_camera_row_header_clicked)
+        vertical_header.sectionDoubleClicked.connect(self.on_camera_row_header_clicked)
 
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.table_view.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -142,6 +251,21 @@ class MainWindow(QMainWindow) :
 
         # Added to the correct main layout variable
         layout.addWidget(self.info_panel_widget)
+
+    def deferred_update_toolbar_display_mode(self, *args):
+        # Wait 10ms for Qt to finish docking the toolbar before checking dimensions
+        QTimer.singleShot(10, self.update_toolbar_display_mode)
+
+    def update_arrow_to_resting_state(self):
+        area = self.toolBarArea(self.toolbar)
+        angles = {
+            Qt.ToolBarArea.TopToolBarArea: 0,      # Points down
+            Qt.ToolBarArea.BottomToolBarArea: 180, # Points up
+            Qt.ToolBarArea.LeftToolBarArea: 270,   # Inverted: points right from the left edge
+            Qt.ToolBarArea.RightToolBarArea: 90    # Inverted: points left from the right edge
+        }
+        resting_angle = angles.get(area, 0)
+        self.display_menu_btn.setIcon(self.create_rotated_icon(ARROW_ICON_PATH, resting_angle, 14, 14))
 
     def on_camera_row_header_clicked(self, logical_index):
         self.close_active_frame_dialog()
@@ -170,13 +294,122 @@ class MainWindow(QMainWindow) :
         else:
             QMessageBox.warning(self, "Input Folder Needed", "Please run the pipeline or use an existing pipeline first so the app knows where the source .blend files are located.")
 
+    def create_custom_sized_icon(self, icon_path, width, height):
+        base_icon = QIcon(str(icon_path))
+        # Scale the pixmap directly to your custom dimensions
+        pixmap = base_icon.pixmap(width, height)
+        return QIcon(pixmap)
+
+    def animate_arrow_rotation(self, start_angle, end_angle):
+        # Stop and clean up any existing timeline animation
+        if hasattr(self, "_arrow_timeline") and self._arrow_timeline.state() == QTimeLine.State.Running:
+            self._arrow_timeline.stop()
+
+        # Create a 150ms timeline with 30 frames
+        self._arrow_timeline = QTimeLine(150, self)
+        self._arrow_timeline.setFrameRange(0, 30)
+        
+        # Connect the frame updates to calculate angle interpolation smoothly
+        self._arrow_timeline.frameChanged.connect(lambda frame: self.update_interpolated_icon(start_angle, end_angle, frame, 30))
+        
+        self._arrow_timeline.start()
+
+    def update_interpolated_icon(self, start_angle, end_angle, frame, max_frames):
+        # Linear interpolation (lerp) from start to end angle based on current frame
+        progress = frame / float(max_frames)
+        current_angle = start_angle + (end_angle - start_angle) * progress
+        self.display_menu_btn.setIcon(self.create_rotated_icon(ARROW_ICON_PATH, current_angle))
+
+    def update_arrow_icon(self, is_open=False):
+        # Find out which area the toolbar is currently docked in
+        area = self.toolBarArea(self.toolbar)
+            
+        angles = {
+            Qt.ToolBarArea.TopToolBarArea: (0, 180),       # Default Down, Clicked Up
+            Qt.ToolBarArea.BottomToolBarArea: (180, 0),    # Default Up, Clicked Down
+            Qt.ToolBarArea.LeftToolBarArea: (90, 270),     # Flipped: Points inward from the left
+            Qt.ToolBarArea.RightToolBarArea: (270, 90)     # Flipped: Points inward from the right
+        }
+            
+        default_angle, flipped_angle = angles.get(area, (0, 180))
+        target_angle = flipped_angle if is_open else default_angle
+            
+        # Always apply the rotated icon directly
+        self.display_menu_btn.setIcon(self.create_rotated_icon(ARROW_ICON_PATH, target_angle))
+
+    def create_rotated_icon(self, icon_path, angle_degrees, width=24, height=24):
+        base_icon = QIcon(str(icon_path))
+        pixmap = base_icon.pixmap(width, height)
+        transform = QTransform().rotate(angle_degrees)
+        rotated_pixmap = pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+        return QIcon(rotated_pixmap)
+
+    def update_toolbar_display_mode(self):
+        icons_checked = self.action_toggle_icons.isChecked()
+        text_checked = self.action_toggle_text.isChecked()
+
+        # Enforce rule: at least one must be checked
+        if not icons_checked and not text_checked:
+            sender = self.sender()
+            if sender:
+                sender.setChecked(True)
+            return
+
+        # Set the tool button style based on user preference
+        if icons_checked and text_checked:
+            self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        elif icons_checked and not text_checked:
+            self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        elif not icons_checked and text_checked:
+            self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+
+        # Check if the toolbar is currently docked vertically (Left or Right)
+        area = self.toolBarArea(self.toolbar)
+        is_vertical = area in (Qt.ToolBarArea.LeftToolBarArea, Qt.ToolBarArea.RightToolBarArea)
+
+        if is_vertical and not text_checked:
+            # Constrict width for vertical icon-only mode
+            self.toolbar.setMaximumWidth(45)
+            self.toolbar.setMinimumWidth(35)
+            self.toolbar.setMaximumHeight(16777215) # Free height constraint
+            self.toolbar.setMinimumHeight(0)
+            
+            if hasattr(self, "mismatch_checkbox"):
+                self.mismatch_checkbox.setText("")
+                self.mismatch_checkbox.setToolTip("Show Mismatches Only")
+                self.mismatch_checkbox.setStyleSheet("""
+                    QCheckBox {
+                        margin-left: 12px; 
+                        margin-top: 6px;
+                        spacing: 2px;
+                    }
+                    QCheckBox::indicator {
+                        width: 18px;
+                        height: 18px;
+                    }
+                """)
+        else:
+            # Free up width and height constraints when horizontal or showing text
+            self.toolbar.setMaximumWidth(16777215)
+            self.toolbar.setMinimumWidth(0)
+            self.toolbar.setMaximumHeight(16777215)
+            self.toolbar.setMinimumHeight(0)
+            
+            if hasattr(self, "mismatch_checkbox"):
+                self.mismatch_checkbox.setText("Show Mismatches Only")
+                self.mismatch_checkbox.setToolTip("")
+                self.mismatch_checkbox.setStyleSheet("")
+
+            self.toolbar.adjustSize()
+            self.toolbar.updateGeometry()
+    
     def on_open_settings(self) :
         dialog = SettingsDialog(self.blender_exe_path, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             if dialog.blender_path:
                 self.blender_exe_path = dialog.blender_path
                 save_cache({"blender_exe_path": self.blender_exe_path})
-                QMessageBox.information(self, "Settings Saved", f"Blender path updated to:\n{self.blender_exe_path}")
+                QMessageBox.information(self, "Success", "Settings saved successfully.")
 
     def close_active_frame_dialog(self):
         if hasattr(self, "active_frame_dialog") and self.active_frame_dialog is not None:
@@ -305,6 +538,37 @@ class MainWindow(QMainWindow) :
         self.mismatch_label.setText(f"<b>Mismatched Frames:</b> {mismatched_count}")
         self.percent_label.setText(f"<b>Sync Rate:</b> {matching_percentage:.1f}%")
 
+    def closeEvent(self, event):
+        """Intercepts the close event to prevent exiting during data extraction."""
+        if hasattr(self, "is_extracting") and self.is_extracting:
+            # Prompt the user that extraction is still in progress
+            reply = QMessageBox.warning(
+                self,
+                "Extraction in Progress",
+                "Blender data extraction is currently running.\nAre you sure you want to quit? This may corrupt temporary files.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                event.accept()  # Let the app close
+            else:
+                event.ignore()  # Cancel the close event
+        else:
+            event.accept()  # Safe to close normally
+
+    def save_toolbar_state(self):
+        cache = load_cache()
+        
+        area = self.toolBarArea(self.toolbar)
+        cache["toolbar_area"] = int(area.value) if hasattr(area, "value") else int(area)
+        
+        # ---> ADD THESE TWO LINES TO SAVE DISPLAY STATES <---
+        cache["icons_visible"] = self.action_toggle_icons.isChecked()
+        cache["text_visible"] = self.action_toggle_text.isChecked()
+        
+        save_cache(cache)
+        self.update_arrow_to_resting_state()
 
 class PipelineConfigDialog(QDialog):
     def __init__(self, parent=None):
@@ -401,8 +665,7 @@ class PipelineWorker(QThread):
     def run(self):
         try:
             self.progress_updated.emit(10, "Initializing Blender batch process...")
-            # If your run_batch_extraction script supports progress callbacks, you can hook them here.
-            # Running standard extraction:
+            self.is_extracting = True
             self.progress_updated.emit(40, "Running extraction script on blend files...")
             run_batch_extraction(self.input_dir, self.output_dir, self.blender_exe_path)
             
@@ -411,17 +674,19 @@ class PipelineWorker(QThread):
         except Exception as e:
             self.finished.emit(False, str(e))
 
-
 class ProgressDialog(QDialog):
     def __init__(self, input_dir, output_dir, blender_exe_path, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Running Pipeline...")
         self.resize(450, 160)
         self.setModal(True)
-        # Disable the close 'X' button while the pipeline is running
-        self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowType.WindowCloseButtonHint) if 'QtCore' in globals() else None
-
+        
+        # Track extraction state immediately
+        self.is_extracting = True
         self.error_message = ""
+
+        # Remove the close button ('X') from the title bar
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint)
 
         layout = QVBoxLayout(self)
 
@@ -447,6 +712,7 @@ class ProgressDialog(QDialog):
         self.status_label.setText(message)
 
     def on_finished(self, success, err_str):
+        self.is_extracting = False
         if success:
             self.progress_bar.setValue(100)
             self.status_label.setText("Pipeline completed successfully!")
@@ -455,79 +721,19 @@ class ProgressDialog(QDialog):
             self.error_message = err_str
             self.reject()
 
+    def keyPressEvent(self, event):
+        """Prevents pressing the Escape key from closing the dialog."""
+        if event.key() == Qt.Key.Key_Escape and self.is_extracting:
+            event.ignore()
+        else:
+            super().keyPressEvent(event)
 
-class SettingsDialog(QDialog):
-    def __init__(self, current_blender_path, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Settings")
-        self.resize(520, 180)
-
-        self.blender_path = current_blender_path
-        
-        layout = QVBoxLayout(self)
-
-        # Blender Installation Folder Section
-        layout.addWidget(QLabel("<b>Select Blender Installation Folder :</b>"))
-        folder_layout = QHBoxLayout()
-        
-        # Use QLineEdit instead of QLabel so it's a nice input box and directly editable
-        self.folder_input = QLineEdit(self.blender_path if self.blender_path else "")
-        self.folder_input.setPlaceholderText("Enter or browse for Blender path...")
-        
-        folder_btn = QPushButton("Browse Folder")
-        folder_btn.clicked.connect(self.select_blender_folder)
-        
-        folder_layout.addWidget(self.folder_input, stretch=1)
-        folder_layout.addWidget(folder_btn)
-        layout.addLayout(folder_layout)
-
-        layout.addSpacing(20)
-
-        # Bottom Buttons (Cancel / Save)
-        button_layout = QHBoxLayout()
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-        
-        self.save_btn = QPushButton("Save")
-        self.save_btn.setStyleSheet("font-weight: bold; padding: 6px 16px;")
-        self.save_btn.clicked.connect(self.on_save)
-        
-        button_layout.addStretch()
-        button_layout.addWidget(cancel_btn)
-        button_layout.addWidget(self.save_btn)
-        layout.addLayout(button_layout)
-
-    def select_blender_folder(self):
-        current_text = self.folder_input.text().strip()
-        start_dir = str(Path(current_text).parent) if current_text and Path(current_text).exists() else ""
-        
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Blender Installation Directory", start_dir)
-        if dir_path:
-            potential_exe = Path(dir_path) / "blender.exe"
-            if potential_exe.exists():
-                self.folder_input.setText(str(potential_exe))
-            else:
-                self.folder_input.setText(dir_path)
-
-    def on_save(self):
-        # Capture whatever the user typed or selected before closing
-        self.blender_path = self.folder_input.text().strip()
-        self.accept()
-
-    def select_blender_folder(self):
-        start_dir = str(Path(self.blender_path).parent) if self.blender_path else ""
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Blender Installation Directory", start_dir)
-        if dir_path:
-            # Automatically look for blender.exe inside the selected folder or confirm path
-            potential_exe = Path(dir_path) / "blender.exe"
-            if potential_exe.exists():
-                self.blender_path = str(potential_exe)
-            else:
-                # If they picked a root folder, keep the directory or let them point to it
-                self.blender_path = dir_path
-                
-            self.folder_label.setText(self.blender_path)
-            self.folder_label.setStyleSheet("color: black;")
+    def closeEvent(self, event):
+        """Prevents Alt+F4 or system close commands while extracting."""
+        if self.is_extracting:
+            event.ignore()
+        else:
+            event.accept()
 
 class ExistingPipelineDialog(QDialog):
     def __init__(self, default_path="", parent=None):
@@ -568,6 +774,8 @@ class ExistingPipelineDialog(QDialog):
     @property
     def selected_file(self):
         return self.path_input.text()
+
+
 
 
 if __name__ == "__main__" :

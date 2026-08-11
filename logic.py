@@ -1,6 +1,5 @@
 import pandas as pd
 from collections import defaultdict
-import os
 
 def load_and_pivot_data(csv_path="output/camera_data.csv") :
 

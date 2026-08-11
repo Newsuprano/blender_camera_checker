@@ -6,3 +6,7 @@ output/
 
 # Python cache
 __pycache__/
+
+test_files/
+
+*.json
