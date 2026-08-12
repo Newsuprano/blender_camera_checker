@@ -1,9 +1,9 @@
 {
     "last_output_dir": "D:/Desktop/camera_checker/output",
-    "last_input_dir": "D:/Desktop/camera_checker/test_files/test3",
-    "last_csv_path": "D:\\Desktop\\camera_checker\\output\\camera_data_5.csv",
+    "last_input_dir": "D:/Desktop/camera_checker/test_files/test8",
+    "last_csv_path": "D:\\Desktop\\camera_checker\\output\\camera_data_fixed.csv",
     "blender_exe_path": "C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe",
-    "decimal_places": 6,
+    "decimal_places": 2,
     "toolbar_area": 4,
     "icons_visible": true,
     "text_visible": true

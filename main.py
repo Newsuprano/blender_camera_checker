@@ -35,7 +35,8 @@ from PyQt6.QtWidgets import (
     QToolButton,
     QMenu,
     QStyle,
-    QSizePolicy
+    QSizePolicy,
+    QComboBox
 )
 from PyQt6.QtGui import (
     QAction,
@@ -58,6 +59,8 @@ ARROW_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "arrow.png"
 RUN_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "play_arrow.png"
 OPEN_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "history.png"
 SETTINGS_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "settings.png"
+FIX_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "data_check.png"
+CAMERA_ICON_PATH = Path(__file__).parent/ "assets" / "icons" / "video_cam.png"
 
 class MainWindow(QMainWindow) :
     def __init__(self) :
@@ -147,24 +150,31 @@ class MainWindow(QMainWindow) :
 
         self.toolbar.addSeparator()
 
-        # 3. Settings Action
+        # 3. Fix Cameras
+        fix_icon = self.create_custom_sized_icon(FIX_ICON_PATH, 16, 16) if FIX_ICON_PATH.exists() else style.standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)
+        self.fix_cameras_action = self.toolbar.addAction(fix_icon, "Fix Cameras")
+        self.fix_cameras_action.triggered.connect(self.on_fix_cameras_clicked)
+
+        self.toolbar.addSeparator()
+
+        # 4. Settings Action
         settings_icon = self.create_custom_sized_icon(SETTINGS_ICON_PATH, 18, 18) if SETTINGS_ICON_PATH.exists() else style.standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
         self.settings_action = self.toolbar.addAction(settings_icon, "Settings")
         self.settings_action.triggered.connect(self.on_open_settings)
 
         self.toolbar.addSeparator()
 
-        # 4. Mismatch Checkbox
+        # 5. Mismatch Checkbox
         self.mismatch_checkbox = QCheckBox("Show Mismatches Only")
         self.mismatch_checkbox.toggled.connect(self.on_toggle_mismatches_checkbox)
         self.toolbar.addWidget(self.mismatch_checkbox)
 
-        # 5. Horizontal Expanding Spacer (Pushes the menu button to the far right)
+        # 6. Horizontal Expanding Spacer (Pushes the menu button to the far right)
         self.spacer = QWidget()
         self.spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.toolbar.addWidget(self.spacer)
 
-        # 6. Dropdown Menu Button with Smooth Rotating Arrow Animation
+        # 7. Dropdown Menu Button with Smooth Rotating Arrow Animation
         self.display_menu_btn = QToolButton(self.toolbar)
         self.display_menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.display_menu_btn.setStyleSheet("""
@@ -413,7 +423,7 @@ class MainWindow(QMainWindow) :
         else :
             self.model.update_data(self.pivot_df)
  
-    def on_run_new_pipeline(self):  
+    def on_run_new_pipeline(self): 
         # 1. Validate Blender executable path first
         if not self.blender_exe_path or not Path(self.blender_exe_path).exists():
             QMessageBox.critical(
@@ -464,30 +474,23 @@ class MainWindow(QMainWindow) :
             if reply == QMessageBox.StandardButton.Cancel:
                 return
 
-        # Pass target_csv_path so the worker writes/counts directly to the custom filename if needed
-        # Clean initialization without needing to pass target_csv_path to the worker
-        progress_dialog = ProgressDialog(input_dir, output_dir, self.blender_exe_path, self)
+        # Pass target_csv_path into the ProgressDialog so it writes directly to the custom name
+        progress_dialog = ProgressDialog(input_dir, output_dir, self.blender_exe_path, csv_path=target_csv_path, parent=self)
         result_code = progress_dialog.exec()
 
         if result_code == QDialog.DialogCode.Accepted:
             try:
-                default_generated_path = Path(output_dir) / "camera_data.csv"
                 self.current_csv_path = target_csv_path
                 
-                # 2. Check if the pipeline actually generated the file before reading/moving it
-                if not default_generated_path.exists():
+                # Check if the custom file was successfully generated directly by the worker
+                if not self.current_csv_path.exists():
                     QMessageBox.critical(
                         self, 
                         "Pipeline Error", 
-                        f"The pipeline finished, but the expected output file ('camera_data.csv') was not generated. Check your script execution or logs.\n"
+                        f"The pipeline finished, but the expected output file ('{self.output_filename}') was not generated. Check your script execution or logs.\n"
                         f"Please verify that your Blender executable path is correct:\n{self.blender_exe_path}"
                     )
                     return
-
-                if default_generated_path.exists() and default_generated_path != self.current_csv_path:
-                    if self.current_csv_path.exists():
-                        self.current_csv_path.unlink()
-                    default_generated_path.rename(self.current_csv_path)
 
                 self.load_data_into_app(str(self.current_csv_path))
                 save_cache({"last_csv_path": str(self.current_csv_path)})
@@ -581,6 +584,58 @@ class MainWindow(QMainWindow) :
         
         save_cache(cache)
         self.update_arrow_to_resting_state()
+
+    def on_fix_cameras_clicked(self):
+        if not hasattr(self, "last_input_dir") or not self.last_input_dir or not Path(self.last_input_dir).exists():
+            QMessageBox.warning(self, "No Input Folder", "Please run a pipeline first so an input directory is selected.")
+            return
+
+        # Retrieve camera names dynamically from the pivot DataFrame index
+        if hasattr(self, "pivot_df") and self.pivot_df is not None and not self.pivot_df.empty:
+            camera_names = list(self.pivot_df.index)
+        else:
+            QMessageBox.warning(self, "No Data Loaded", "Please load or extract table data before fixing cameras.")
+            return
+
+        output_dir = getattr(self, "last_output_dir", self.last_input_dir)
+
+        # Grab your custom CSV filename 
+        custom_csv_name = getattr(self, "current_csv_filename", "camera_data.csv")
+        target_csv_path = Path(output_dir) / custom_csv_name
+
+        dialog = FixCamerasDialog(camera_names, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            ref_camera = dialog.selected_reference
+            should_set_active = dialog.set_active_checkbox.isChecked()
+
+            # Launch the ProgressDialog in "fix" mode instead of starting a standalone worker
+            ref_filename = ref_camera if ref_camera.endswith(".blend") else f"{ref_camera}.blend"
+            actual_reference_path = str(Path(self.last_input_dir) / ref_filename)
+
+            progress_dialog = ProgressDialog(
+                input_dir=self.last_input_dir,
+                output_dir=output_dir,
+                blender_exe_path=self.blender_exe_path,
+                mode="fix",
+                reference_blend_path=actual_reference_path,
+                set_active_camera=should_set_active,
+                parent=self
+            )
+            result_code = progress_dialog.exec()
+
+            if result_code == QDialog.DialogCode.Accepted:
+                if should_set_active:
+                    msg = (
+                        f"Successfully generated 'fixed camera from {ref_camera}' across all files!\n\n"
+                        "Please run a new pipeline to see the difference and check if it worked well."
+                    )
+                else:
+                    msg = f"Successfully generated 'fixed camera from {ref_camera}' across all files!"
+
+                QMessageBox.information(self, "Success", msg)
+            else:
+                if progress_dialog.error_message:
+                    QMessageBox.critical(self, "Error", f"Failed to fix cameras:\n{progress_dialog.error_message}")
 
 class PipelineConfigDialog(QDialog):
     def __init__(self, parent=None):
@@ -681,39 +736,79 @@ class PipelineWorker(QThread):
     progress_updated = pyqtSignal(int, int, str)
     finished = pyqtSignal(bool, str, int)
 
-    def __init__(self, input_dir, output_dir, blender_exe_path):
+    def __init__(self, input_dir, output_dir, blender_exe_path, mode="extract", reference_filename=None, set_active_camera=False, csv_path=None, reference_blend_path=None):
         super().__init__()
         self.input_dir = input_dir
         self.output_dir = output_dir
         self.blender_exe_path = blender_exe_path
+        self.mode = mode
+        self.reference_filename = reference_filename
+        self.set_active_camera = set_active_camera
+        self.csv_path = csv_path
+        self.reference_blend_path = reference_blend_path  # The master reference .blend file path
 
     def run(self):
         try:
+            import script
+            
             def handle_progress(current, total, msg):
                 self.progress_updated.emit(current, total, msg)
 
-            run_batch_extraction(
-                self.input_dir, 
-                self.output_dir, 
-                self.blender_exe_path, 
-                progress_callback=handle_progress
-            )
-            
-            # Count rows from the default generated file
-            default_generated_path = Path(self.output_dir) / "camera_data.csv"
-            extracted_count = 0
-            if default_generated_path.exists():
-                with open(default_generated_path, "r", encoding="utf-8") as f:
-                    extracted_count = max(0, sum(1 for _ in f) - 1)
-            
-            self.finished.emit(True, "", extracted_count)
+            if self.mode == "extract":
+                csv_filename = Path(self.csv_path).name if self.csv_path else "camera_data.csv"
+
+                script.run_batch_extraction(
+                    self.input_dir, 
+                    self.output_dir, 
+                    self.blender_exe_path, 
+                    progress_callback=handle_progress,
+                    csv_filename=csv_filename
+                )
+                
+                default_generated_path = Path(self.csv_path) if self.csv_path else Path(self.output_dir) / "camera_data.csv"
+                extracted_count = 0
+                if default_generated_path.exists():
+                    with open(default_generated_path, "r", encoding="utf-8") as f:
+                        extracted_count = max(0, sum(1 for _ in f) - 1)
+                
+                self.finished.emit(True, "", extracted_count)
+
+            elif self.mode == "fix":
+                if not self.reference_blend_path:
+                    raise ValueError("Reference blend path is required for fix mode.")
+                
+                input_folder_path = Path(self.input_dir)
+                blend_files = list(input_folder_path.glob('*.blend'))
+                total_files = len(blend_files)
+
+                fixer_script_path = Path(__file__).parent / "blender_fixer.py"
+                ref_path_resolved = Path(self.reference_blend_path).resolve()
+
+                for index, file_path in enumerate(blend_files, start=1):
+                    # Skip the reference file itself
+                    if file_path.resolve() == ref_path_resolved:
+                        continue
+
+                    self.progress_updated.emit(
+                        index, 
+                        total_files, 
+                        f"Processing {file_path.name} ({index}/{total_files})"
+                    )
+                    
+                    active_flag = "--set-active" if self.set_active_camera else ""
+                    cmd = f'"{self.blender_exe_path}" --background "{file_path}" --python "{fixer_script_path}" -- --ref-file "{self.reference_blend_path}" {active_flag}'
+                    
+                    subprocess.run(cmd, shell=True, check=True)
+                
+                self.finished.emit(True, "Cameras fixed successfully!", 0)
+
         except Exception as e:
             self.finished.emit(False, str(e), 0)
             
 class ProgressDialog(QDialog):
-    def __init__(self, input_dir, output_dir, blender_exe_path, parent=None):
+    def __init__(self, input_dir, output_dir, blender_exe_path, mode="extract", reference_filename=None, set_active_camera=False, csv_path=None, reference_blend_path=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Running Pipeline...")
+        self.setWindowTitle("Running Pipeline..." if mode == "extract" else "Fixing Camera...")
         self.resize(450, 160)
         self.setModal(True)
         
@@ -736,12 +831,21 @@ class ProgressDialog(QDialog):
 
         layout.addSpacing(10)
 
-        # Start background worker thread
-        self.worker = PipelineWorker(input_dir, output_dir, blender_exe_path)
-        self.worker.progress_updated.connect(self.update_progress)
+        self.worker = PipelineWorker(
+            input_dir=input_dir,
+            output_dir=output_dir,
+            blender_exe_path=blender_exe_path,
+            mode=mode,
+            reference_filename=reference_filename,
+            set_active_camera=set_active_camera,
+            csv_path=csv_path,
+            reference_blend_path=reference_blend_path
+        )
+        self.worker.progress_updated.connect(self.update_progress)  # Connects here
         self.worker.finished.connect(self.on_finished)
         self.worker.start()
 
+    # Add this method back into the ProgressDialog class:
     def update_progress(self, current, total, message):
         self.progress_bar.setRange(0, total)
         self.progress_bar.setValue(current)
@@ -752,23 +856,11 @@ class ProgressDialog(QDialog):
         self.extracted_count = count
         if success:
             self.progress_bar.setValue(self.progress_bar.maximum())
-            self.status_label.setText("Pipeline completed successfully!")
+            self.status_label.setText("Operation completed successfully!")
             self.accept()
         else:
             self.error_message = err_str
             self.reject()
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Escape and self.is_extracting:
-            event.ignore()
-        else:
-            super().keyPressEvent(event)
-
-    def closeEvent(self, event):
-        if self.is_extracting:
-            event.ignore()
-        else:
-            event.accept()
 
 class ExistingPipelineDialog(QDialog):
     def __init__(self, default_path="", parent=None):
@@ -810,8 +902,62 @@ class ExistingPipelineDialog(QDialog):
     def selected_file(self):
         return self.path_input.text()
 
+from PyQt6.QtGui import QIcon, QPixmap  # Make sure QIcon is imported
 
+class FixCamerasDialog(QDialog):
+    def __init__(self, camera_names, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Fix Camera Synchronization")
+        self.resize(400, 210)  
+        self.setModal(True)
 
+        self.selected_reference = None
+
+        layout = QVBoxLayout(self)
+
+        instructions = QLabel(
+            "Select a reference camera. A new camera named 'fixed camera from [Reference]' "
+            "will be generated in each .blend file."
+        )
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
+
+        self.combo_box = QComboBox()
+        
+        # Load your custom camera icon (adjust path as needed)
+        camera_icon = QIcon(str(CAMERA_ICON_PATH))
+
+        # Populate the combo box with the custom icon and name for each camera
+        for name in camera_names:
+            self.combo_box.addItem(camera_icon, name)
+            
+        layout.addWidget(self.combo_box)
+
+        # 1. Initialize the checkbox and add it to the layout
+        self.set_active_checkbox = QCheckBox("Automatically set as active scene camera")
+        self.set_active_checkbox.setToolTip(
+            "Enables the extracted camera data to be verified within the application by setting the new fixed camera as the active scene camera."
+        )
+        self.set_active_checkbox.setChecked(False)  
+        layout.addWidget(self.set_active_checkbox)
+
+        layout.addSpacing(5)
+
+        button_layout = QHBoxLayout()
+        self.fix_button = QPushButton("Create Fixed Cameras")
+        self.fix_button.setStyleSheet("font-weight: bold; background-color: #2b5b84; color: white; padding: 6px;")
+        self.fix_button.clicked.connect(self.on_accept)
+        
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+
+        button_layout.addWidget(self.fix_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+
+    def on_accept(self):
+        self.selected_reference = self.combo_box.currentText()
+        self.accept()
 
 if __name__ == "__main__" :
     app = QApplication(sys.argv)
