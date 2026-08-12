@@ -20,6 +20,7 @@ Camera Sync Checker is a desktop utility app built with Python and PyQt designed
 ## 📦 Installation & Usage
 
 ### Option 1: Run the Pre-compiled App (Recommended for Users)
+
 1. Head over to the **[Releases](../../releases)** page of this repository.
 2. Download the latest `CameraChecker.zip` archive.
 3. Extract the contents anywhere on your computer.
@@ -32,14 +33,11 @@ If you want to run or modify the code locally:
 1. Clone the repository:
 git clone https://github.com/Newsuprano/camera_checker.git
 cd camera_checker
-
 2. Create and activate a virtual environment:
 python -m venv .venv
 .venv\Scripts\Activate.ps1  # On Windows PowerShell
-
 3. Install dependencies:
 pip install -r requirements.txt
-
 4. Run the main application:
 python src/main.py
 
