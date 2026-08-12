@@ -9,8 +9,9 @@ from PyQt6.QtGui import (
     QIcon
 )
 from logic import get_frame_clusters_tuple
+from assets import get_ressource_path
 
-ICON_PATH = Path(__file__).parent / "assets" / "icons" / "blender_icon.png"
+ICON_PATH = Path(get_ressource_path("assets/icons/blender_icon.png"))
 
 class CameraTableModel(QAbstractTableModel) :
     def __init__(self, df) :

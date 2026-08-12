@@ -1,6 +1,8 @@
 import argparse
 import subprocess
 from pathlib import Path
+from assets import get_ressource_path
+
 
 def run_batch_extraction(input_dir, output_dir, blender_exe, progress_callback=None, csv_filename="camera_data.csv"):
     input_folder_path = Path(input_dir)
@@ -11,7 +13,7 @@ def run_batch_extraction(input_dir, output_dir, blender_exe, progress_callback=N
     if raw_data_csv.exists():
         raw_data_csv.unlink()
 
-    extractor_path = Path(__file__).parent / "blender_extractor.py"
+    extractor_path = Path(get_ressource_path("blender_extractor.py"))
     
     blend_files = list(input_folder_path.glob('*.blend'))
     total_files = len(blend_files)
@@ -26,7 +28,7 @@ def run_batch_extraction(input_dir, output_dir, blender_exe, progress_callback=N
 
 def run_batch_fixer(input_dir, output_dir, reference_filename, blender_exe, progress_callback=None, set_active=False, csv_path=None):
     input_folder_path = Path(input_dir)
-    fixer_path = Path(__file__).parent / "blender_fixer.py"
+    fixer_path = Path(get_ressource_path("blender_fixer.py"))
     
     # Use the explicitly provided csv_path, or fall back safely to camera_data.csv in output_dir
     target_csv = Path(csv_path) if csv_path else Path(output_dir) / "camera_data.csv"

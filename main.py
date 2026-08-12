@@ -54,13 +54,14 @@ from logic import (
 from script import run_batch_extraction
 from settings_dialog import SettingsDialog
 from ui_table_model import CameraTableModel
+from assets import get_ressource_path
 
-ARROW_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "arrow.png"
-RUN_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "play_arrow.png"
-OPEN_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "history.png"
-SETTINGS_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "settings.png"
-FIX_ICON_PATH = Path(__file__).parent / "assets" / "icons" / "data_check.png"
-CAMERA_ICON_PATH = Path(__file__).parent/ "assets" / "icons" / "video_cam.png"
+ARROW_ICON_PATH = Path(get_ressource_path("assets/icons/arrow.png"))
+RUN_ICON_PATH = Path(get_ressource_path("assets/icons/play_arrow.png"))
+OPEN_ICON_PATH = Path(get_ressource_path("assets/icons/history.png"))
+SETTINGS_ICON_PATH = Path(get_ressource_path("assets/icons/settings.png"))
+FIX_ICON_PATH = Path(get_ressource_path("assets/icons/data_check.png"))
+CAMERA_ICON_PATH = Path(get_ressource_path("assets/icons/video_cam.png"))
 
 class MainWindow(QMainWindow) :
     def __init__(self) :
@@ -749,15 +750,13 @@ class PipelineWorker(QThread):
 
     def run(self):
         try:
-            import script
-            
             def handle_progress(current, total, msg):
                 self.progress_updated.emit(current, total, msg)
 
             if self.mode == "extract":
                 csv_filename = Path(self.csv_path).name if self.csv_path else "camera_data.csv"
 
-                script.run_batch_extraction(
+                run_batch_extraction(
                     self.input_dir, 
                     self.output_dir, 
                     self.blender_exe_path, 
@@ -902,8 +901,6 @@ class ExistingPipelineDialog(QDialog):
     def selected_file(self):
         return self.path_input.text()
 
-from PyQt6.QtGui import QIcon, QPixmap  # Make sure QIcon is imported
-
 class FixCamerasDialog(QDialog):
     def __init__(self, camera_names, parent=None):
         super().__init__(parent)
@@ -962,8 +959,8 @@ class FixCamerasDialog(QDialog):
 if __name__ == "__main__" :
     app = QApplication(sys.argv)
     app.setApplicationName("Camera Sync Checker")
-    #app.setOrganizationName("YourNameOrStudio")
-    #app.setWindowIcon(QIcon(str(Path("assets/app_icon.png"))))
+    icon_path = get_ressource_path("assets/icons/logo_2.png")
+    app.setWindowIcon(QIcon(str(icon_path)))
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
