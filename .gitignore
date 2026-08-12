@@ -12,3 +12,7 @@ test_files/
 
 #Cache
 config_cache.json
+
+build/
+
+dist/
