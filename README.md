@@ -34,10 +34,10 @@ If you want to run or modify the code locally:
 git clone https://github.com/Newsuprano/camera_checker.git \
 cd camera_checker 
 3. Create and activate a virtual environment: \
-python -m venv .venv 
-.venv\Scripts\Activate.ps1  # On Windows PowerShell \
-5. Install dependencies: 
-pip install -r requirements.txt \
+python -m venv .venv \ 
+.venv\Scripts\Activate.ps1  # On Windows PowerShell 
+5. Install dependencies: \
+pip install -r requirements.txt 
 7. Run the main application: \
 python src/main.py 
 
